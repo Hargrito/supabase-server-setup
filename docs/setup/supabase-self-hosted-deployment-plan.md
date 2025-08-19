@@ -51,7 +51,7 @@ This document provides a comprehensive deployment guide for self-hosting Supabas
 - [ ] Phase 1: Base system hardening (SSH, UFW, Fail2Ban)
 - [ ] Phase 2: Docker & project scaffold
 - [ ] Phase 3: Shared Postgres provisioned
-- [ ] Phase 4: Minimal Inventory stack scaffold prepared (no template required)
+- [ ] Phase 4: Minimal Inventory & Moving scaffolds prepared (no template required)
 - [ ] Phase 5: Inventory stack configured and running
 - [ ] Phase 6: Moving stack configured and running
 - [ ] Phase 7: Nginx sites + TLS certificates
@@ -293,9 +293,17 @@ Mirror the Inventory scaffold to validate the `moving_db` connection.
         timeout: 5s
         retries: 5
       restart: unless-stopped
+      networks:
+        supabase_shared:
+          aliases:
+            - shared_postgres
 
   volumes:
     postgres_data:
+
+  networks:
+    supabase_shared:
+      external: true
   ```
 
 - [ ] Create `shared/init-databases.sql`
@@ -322,12 +330,13 @@ Mirror the Inventory scaffold to validate the `moving_db` connection.
   # Project-specific settings
   PROJECT_NAME=inventory
   
-  # Database
-  POSTGRES_HOST=postgres
+  # Database (shared Postgres on Docker network)
+  POSTGRES_HOST=shared_postgres
   POSTGRES_PORT=5432
   POSTGRES_DB=inventory_db
   POSTGRES_USER=supabase
   POSTGRES_PASSWORD=change_me_strong_db_password
+  DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
   
   # Supabase
   JWT_SECRET=change_me_inventory_jwt_secret
@@ -340,12 +349,9 @@ Mirror the Inventory scaffold to validate the `moving_db` connection.
   
   # Studio
   STUDIO_PORT=3001
-  
-  # Kong
+  # Local-only bind ports (Nginx will proxy)
   KONG_HTTP_PORT=8000
   KONG_HTTPS_PORT=8443
-  
-  # PgBouncer
   PGBOUNCER_PORT=6432
   ```
 
