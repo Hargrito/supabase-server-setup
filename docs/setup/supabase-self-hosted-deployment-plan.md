@@ -63,6 +63,96 @@ This document provides a comprehensive deployment guide for self-hosting Supabas
 
 ---
 
+## Phase Runbook and Key Fixes (0–5)
+
+This records the exact steps and conditions that made the stack work during initial bring-up.
+
+### Phase 0: Access & DNS readiness
+- Verify SSH access for `supauser`. Confirm UFW allows 22 only initially.
+- Prepare DNS records (A/AAAA) but keep services bound to 127.0.0.1 until Nginx/Kong.
+
+### Phase 1: Base hardening
+- Apply SSH hardening and enable UFW + Fail2Ban as per `## 3) Server Preparation Checklist`.
+
+### Phase 2: Docker & scaffold
+- Install Docker/Compose and create `~/supabase-docker/{shared,inventory,moving}` as per `## 4) Docker & Compose Setup` and `## 4–5 minimal scaffolds`.
+
+### Phase 3: Shared Postgres
+- Bring up shared Postgres on 127.0.0.1:5432 and create `inventory_db` + `moving_db`.
+- Network alias used: `shared_postgres` on `supabase_shared` network.
+
+### Phase 4: Inventory scaffold
+- Created minimal Inventory project directory and `.env` with DB connectivity.
+
+### Phase 5: Inventory stack bring-up (Auth + REST)
+- Ensure API loopback binding and external URL placeholder:
+  ```bash
+  cd ~/supabase-docker/inventory
+  grep -q '^API_EXTERNAL_URL=' .env || echo 'API_EXTERNAL_URL=http://127.0.0.1:5555' >> .env
+  sed -i 's|^API_EXTERNAL_URL=.*|API_EXTERNAL_URL=http://127.0.0.1:5555|' .env
+  grep ^API_EXTERNAL_URL= .env
+  ```
+- Inject `GOTRUE_DB_NAMESPACE` to `auth` service (so GoTrue uses `auth` schema):
+  ```bash
+  sed -i '/GOTRUE_DB_DRIVER: "postgres"/a\      GOTRUE_DB_NAMESPACE: auth' docker-compose.yml
+  ```
+- Fix 1: Create `auth` schema before GoTrue migrations (ownership: `${POSTGRES_USER}`):
+  ```bash
+  PW=$(grep -E '^POSTGRES_PASSWORD=' .env | cut -d= -f2)
+  USER=$(grep -E '^POSTGRES_USER=' .env | cut -d= -f2)
+  DB=$(grep -E '^POSTGRES_DB=' .env | cut -d= -f2)
+  docker run --rm --network supabase_shared -e PGPASSWORD="$PW" postgres:15 \
+    psql -h shared_postgres -p 5432 -U "$USER" -d "$DB" -v ON_ERROR_STOP=1 -c "
+  CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION $USER;
+  "
+  ```
+- Fix 2: Satisfy migration grants to non-existent role `postgres` by creating a NOLOGIN role:
+  ```bash
+  docker run --rm --network supabase_shared -e PGPASSWORD="$PW" postgres:15 \
+    psql -h shared_postgres -p 5432 -U "$USER" -d "$DB" -v ON_ERROR_STOP=1 -c "
+  DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN CREATE ROLE postgres; END IF; END $$;
+  "
+  ```
+- Fix 3: Create missing enum `auth.factor_type` so later migrations can `ADD VALUE 'phone'`:
+  ```bash
+  docker run --rm --network supabase_shared -e PGPASSWORD="$PW" postgres:15 \
+    psql -h shared_postgres -p 5432 -U "$USER" -d "$DB" -v ON_ERROR_STOP=1 -c "
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+      WHERE t.typname = 'factor_type' AND n.nspname = 'auth'
+    ) THEN
+      CREATE TYPE auth.factor_type AS ENUM ('totp','webauthn');
+    END IF;
+  END $$;
+  "
+  ```
+- Recreate Auth and verify successful migrations and port binding:
+  ```bash
+  docker compose up -d --force-recreate auth
+  docker compose logs auth --no-color --tail=200
+  ss -ltnp | grep 5555   # Expect docker-proxy listening on 127.0.0.1:5555
+  ```
+- Health checks and JWT roundtrip:
+  ```bash
+  # From VPS
+  curl -i http://127.0.0.1:5555/health   # Expect 200
+
+  # Generate signed anon JWT and hit PostgREST (5512)
+  SECRET=$(grep ^JWT_SECRET= .env | cut -d= -f2)
+  HDR=$(printf '{"alg":"HS256","typ":"JWT"}' | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+  NOW=$(date +%s); EXP=$((NOW+3600))
+  PL=$(printf '{"role":"anon","iss":"supabase","iat":%s,"exp":%s}' "$NOW" "$EXP" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+  SIG=$(printf "%s.%s" "$HDR" "$PL" | openssl dgst -sha256 -hmac "$SECRET" -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+  TOKEN="$HDR.$PL.$SIG"
+  curl -i http://127.0.0.1:5512 -H "Authorization: Bearer $TOKEN"  # Expect 200 OpenAPI JSON
+  ```
+
+Notes:
+- All service ports are bound to `127.0.0.1` and accessed via SSH tunnels until Nginx/Kong + TLS are configured.
+- Ensure `GOTRUE_API_HOST=0.0.0.0`, `GOTRUE_API_PORT=9999`, and compose port mapping `127.0.0.1:${AUTH_PORT}:9999` exist.
+
 ## 4) Minimal Inventory Stack Scaffold (no template)
 
 If a stack template is not available, create a minimal scaffold to validate DB connectivity and prepare for Supabase services later.
