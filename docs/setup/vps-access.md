@@ -12,9 +12,9 @@ Use this page to record connection details and confirm prerequisites before depl
 
 ## VPS Details
 - Provider: Hostinger VPS
-- OS: Ubuntu 22.04 LTS
-- Public IPv4: <to-confirm>
-- Hostname: <to-confirm>
+- OS: Ubuntu 24.04 LTS
+- Public IPv4: 147.79.75.80
+- Hostname: srv656044.hstgr.cloud
 - Primary user: supauser (sudo)
 - SSH Port: 22
 
@@ -28,13 +28,19 @@ Use this page to record connection details and confirm prerequisites before depl
 
 ## DNS Readiness
 - Domain registrar/provider: <to-confirm>
-- Planned subdomains:
-  - api-inventory.<domain>
-  - studio-inventory.<domain>
-  - api-moving.<domain>
-  - studio-moving.<domain>
-- [ ] Create A records pointing to VPS IP
-- [ ] Confirm propagation: `dig +short api-inventory.<domain>`
+- Planned subdomains (alpha2web.com):
+  - api-inventory.alpha2web.com
+  - studio-inventory.alpha2web.com
+  - api-moving.alpha2web.com
+  - studio-moving.alpha2web.com
+- [x] Create A records pointing to VPS IP (147.79.75.80)
+- [ ] Confirm propagation:
+ ```bash
+ dig +short api-inventory.alpha2web.com
+ dig +short studio-inventory.alpha2web.com
+ dig +short api-moving.alpha2web.com
+ dig +short studio-moving.alpha2web.com
+ ```
 
 ## Notes
 - Keep fingerprints and last test time here for audit.

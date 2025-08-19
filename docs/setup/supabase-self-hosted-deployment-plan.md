@@ -14,15 +14,15 @@ This document provides a comprehensive deployment guide for self-hosting Supabas
 
 ## Related Docs
 
-- Add a Stack guide: `docs/setup/add-a-stack.md`
-- Stack template folder: `docs/templates/stack-template/`
+- Add a Stack guide: `docs/setup/add-a-stack.md` (optional)
+- Stack template folder: `docs/templates/stack-template/` (optional; not required for minimal scaffolds)
 
 ---
 
 ## 1) Environment Overview
 
 - **Provider**: Hostinger VPS (dedicated for Supabase)
-- **OS**: Ubuntu 22.04 LTS
+- **OS**: Ubuntu 24.04 LTS
 - **Specs**: 4 vCPU, 16 GB RAM, 200 GB NVMe, 16 TB bandwidth
 - **Purpose**: Multi-project Supabase hosting (Inventory Builder + Moving/AI Agent)
 - **Architecture**: Two isolated Supabase stacks on one VPS
@@ -51,7 +51,7 @@ This document provides a comprehensive deployment guide for self-hosting Supabas
 - [ ] Phase 1: Base system hardening (SSH, UFW, Fail2Ban)
 - [ ] Phase 2: Docker & project scaffold
 - [ ] Phase 3: Shared Postgres provisioned
-- [ ] Phase 4: Stack template prepared (see `docs/setup/add-a-stack.md` and `docs/templates/stack-template/`)
+- [ ] Phase 4: Minimal Inventory stack scaffold prepared (no template required)
 - [ ] Phase 5: Inventory stack configured and running
 - [ ] Phase 6: Moving stack configured and running
 - [ ] Phase 7: Nginx sites + TLS certificates
@@ -60,6 +60,140 @@ This document provides a comprehensive deployment guide for self-hosting Supabas
 - [ ] Phase 10: Encrypted secrets integrated
 - [ ] Phase 11: App-level security hardening complete
 - [ ] Phase 12: Verification & handover checklist complete
+
+---
+
+## 4) Minimal Inventory Stack Scaffold (no template)
+
+If a stack template is not available, create a minimal scaffold to validate DB connectivity and prepare for Supabase services later.
+
+### Steps (on the VPS)
+
+1. Create Inventory directory and files
+   ```bash
+   mkdir -p ~/supabase-docker/inventory
+   cd ~/supabase-docker/inventory
+   
+   # .env — use the same DB password from shared Postgres
+   cat > .env << 'EOF'
+   PROJECT_NAME=inventory
+   TIMEZONE=UTC
+   DB_HOST=shared_postgres
+   DB_PORT=5432
+   DB_USER=supabase
+   DB_PASSWORD=change_this_to_a_strong_password
+   DB_NAME=inventory_db
+   EOF
+   
+   # docker-compose.yml — provides Adminer for quick DB validation (local-only)
+   cat > docker-compose.yml << 'EOF'
+   services:
+     adminer:
+       image: adminer:4
+       container_name: inventory_adminer
+       environment:
+         - ADMINER_DEFAULT_SERVER=${DB_HOST}
+       ports:
+         - "127.0.0.1:8080:8080"  # access via SSH tunnel only
+       restart: unless-stopped
+       networks:
+         - supabase_shared
+   
+   networks:
+     supabase_shared:
+       external: true
+   EOF
+   ```
+
+2. Start and verify
+   ```bash
+   cd ~/supabase-docker/inventory
+   docker compose up -d
+   docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+   ```
+
+3. Test DB via Adminer (optional)
+   - From your workstation, open an SSH tunnel:
+     ```bash
+     ssh -L 8080:127.0.0.1:8080 supauser@<server_ip>
+     ```
+   - In a browser, go to http://127.0.0.1:8080 and log in:
+     - System: PostgreSQL
+     - Server: `shared_postgres`
+     - Username: `supabase`
+     - Password: the shared Postgres password
+     - Database: `inventory_db`
+
+4. Next (later): replace Adminer with real Supabase services, configure environment (JWT/keys/ports), and expose via Nginx + TLS.
+
+---
+
+## 5) Minimal Moving Stack Scaffold (no template)
+
+Mirror the Inventory scaffold to validate the `moving_db` connection.
+
+### Steps (on the VPS)
+
+1. Create Moving directory and files
+   ```bash
+   mkdir -p ~/supabase-docker/moving
+   cd ~/supabase-docker/moving
+   
+   # .env — same DB password as shared Postgres
+   cat > .env << 'EOF'
+   PROJECT_NAME=moving
+   TIMEZONE=UTC
+   DB_HOST=shared_postgres
+   DB_PORT=5432
+   DB_USER=supabase
+   DB_PASSWORD=change_this_to_a_strong_password
+   DB_NAME=moving_db
+   EOF
+   
+   # docker-compose.yml — Adminer on a different LOCAL port
+   cat > docker-compose.yml << 'EOF'
+   services:
+     adminer:
+       image: adminer:4
+       container_name: moving_adminer
+       environment:
+         - ADMINER_DEFAULT_SERVER=${DB_HOST}
+       ports:
+         - "127.0.0.1:8081:8080"  # host:container
+       restart: unless-stopped
+       networks:
+         - supabase_shared
+   
+   networks:
+     supabase_shared:
+       external: true
+   EOF
+   ```
+
+2. Start and verify
+   ```bash
+   cd ~/supabase-docker/moving
+   docker compose up -d
+   docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' | grep moving_adminer
+   ```
+   Expected: `127.0.0.1:8081->8080/tcp`.
+
+3. Test via SSH tunnel from your workstation
+   ```bash
+   ssh -L 8081:127.0.0.1:8081 supauser@<server_ip>
+   ```
+   Open http://127.0.0.1:8081 and log in (System: PostgreSQL):
+   - Server: `shared_postgres`
+   - Username: `supabase`
+   - Password: shared Postgres password
+   - Database: `moving_db`
+
+4. If you changed the compose and port still shows 8081->8081
+   ```bash
+   docker compose up -d --force-recreate
+   # or
+   docker compose down && docker compose up -d
+   ```
 
 ---
 
