@@ -84,7 +84,7 @@ This records the exact steps and conditions that made the stack work during init
 ### Phase 4: Inventory scaffold
 - Created minimal Inventory project directory and `.env` with DB connectivity.
 
-### Phase 5: Inventory stack bring-up (Auth + REST)
+### Phase 5: Inventory stack bring-up (Auth + REST + Realtime)
 - Ensure API loopback binding and external URL placeholder:
   ```bash
   cd ~/supabase-docker/inventory
@@ -128,11 +128,39 @@ This records the exact steps and conditions that made the stack work during init
   END $$;
   "
   ```
+- Fix 4: Configure realtime schema and search_path (CRITICAL FIX):
+  ```bash
+  docker run --rm --network supabase_shared -e PGPASSWORD="$PW" postgres:15 \
+    psql -h shared_postgres -p 5432 -U "$USER" -d "$DB" -v ON_ERROR_STOP=1 <<SQL
+  -- Ensure _realtime schema exists
+  CREATE SCHEMA IF NOT EXISTS _realtime;
+  
+  -- Set DB-level search_path (works for all users)
+  SELECT format('ALTER DATABASE %I SET search_path = _realtime, public', '$DB') \gexec
+  
+  -- Set role-level search_path as backup
+  DO \$\$
+  BEGIN
+    EXECUTE format('ALTER ROLE %I IN DATABASE %I SET search_path = _realtime, public', '$USER', '$DB');
+  END
+  \$\$;
+  
+  -- Verify search_path
+  SHOW search_path;
+  SQL
+  ```
 - Recreate Auth and verify successful migrations and port binding:
   ```bash
   docker compose up -d --force-recreate auth
   docker compose logs auth --no-color --tail=200
   ss -ltnp | grep 5555   # Expect docker-proxy listening on 127.0.0.1:5555
+  ```
+- Start Realtime service and verify:
+  ```bash
+  docker compose up -d realtime
+  sleep 5
+  docker compose logs realtime --no-color --tail=50
+  curl -i http://127.0.0.1:54340/api/health   # Expect 200 OK
   ```
 - Health checks and JWT roundtrip:
   ```bash
